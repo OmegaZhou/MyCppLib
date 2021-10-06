@@ -3,6 +3,8 @@
 #include <iostream>
 #include <thread>
 
+
+
 static LRESULT CALLBACK Proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
 {
 
@@ -38,7 +40,7 @@ ZLib::ZWindow& ZLib::ZWindow::start()
 	if (is_start) {
 		return *this;
 	}
-	hwnd = CreateWindow(TEXT("MyClass"),    //窗口类名
+	hwnd = CreateWindow(Z_STRING("MyClass"),    //窗口类名
 		config.window_name.c_str(),    //窗口标题，会在窗口的左上角标题栏显示
 		WS_OVERLAPPEDWINDOW | WS_CAPTION, //窗口风格
 		CW_USEDEFAULT,  //窗口左上角x位置，这里使用的系统默认值，可自定义
@@ -61,7 +63,7 @@ ZLib::ZWindow& ZLib::ZWindow::start()
 
 WPARAM ZLib::ZWindow::loop()
 {
-	while ((!is_closed) && GetMessage(&msg, hwnd, NULL, 0)) {
+	while ((!is_closed) && GetMessage(&msg, hwnd, NULL, 0)>0) {
 
 		//翻译消息
 		TranslateMessage(&msg);
@@ -89,13 +91,13 @@ HWND ZLib::ZWindow::getHWND() const
 bool ZLib::ZWindow::draw(const ImageBuffer & buffer, UINT message)
 {
 	if (buffer.getWidth() != config.width && buffer.getHeight() != config.height) {
-		return false;
+		std::cerr << "Warning: Color buffer size not equal window size\n";
 	}
 	BITMAPINFOHEADER bi_header;
 	memset(&bi_header, 0, sizeof(BITMAPINFOHEADER));
 	bi_header.biSize = sizeof(BITMAPINFOHEADER);
-	bi_header.biWidth = config.width;
-	bi_header.biHeight = config.height;  
+	bi_header.biWidth = buffer.getWidth();
+	bi_header.biHeight = buffer.getHeight();
 	bi_header.biPlanes = 1;
 	bi_header.biBitCount = 32;
 	bi_header.biCompression = BI_RGB;
@@ -111,7 +113,7 @@ bool ZLib::ZWindow::draw(const ImageBuffer & buffer, UINT message)
 	
 	hdcmem = CreateCompatibleDC(hdc);
 	hbmp = CreateDIBSection(hdcmem, (BITMAPINFO*)&bi_header,DIB_RGB_COLORS, (void**)&colors, NULL, 0);
-	memcpy(colors, buffer.getBuffer(), sizeof(Color) * config.width * config.height);
+	memcpy(colors, buffer.getBuffer(), sizeof(Color) * buffer.getWidth() * buffer.getHeight());
 	auto old_bitmap = SelectObject(hdcmem, hbmp);
 	BitBlt(hdc, 0, 0, config.width, config.height, hdcmem, 0, 0, SRCCOPY);
 	if (message == WM_PAINT) {
@@ -139,11 +141,11 @@ void ZLib::ZWindow::init()
 	wndclass.hCursor = LoadCursor(NULL, IDC_ARROW);
 	wndclass.hbrBackground = (HBRUSH)GetStockObject(WHITE_BRUSH);
 	wndclass.lpszMenuName = NULL;
-	wndclass.lpszClassName = TEXT("MyClass");
+	wndclass.lpszClassName = Z_STRING("MyClass");
 
 	if (!RegisterClass(&wndclass)) {
 		//注册窗口类失败时，弹出提示
-		MessageBox(NULL, TEXT("This program requires Window NT!"), TEXT("MyClass"), MB_ICONERROR);
+		MessageBox(NULL, Z_STRING("This program requires Window NT!"), Z_STRING("MyClass"), MB_ICONERROR);
 		exit(1);
 	}
 }
@@ -163,17 +165,14 @@ void ZLib::WindowConfig::appendMenuItem(const MenuInfo& info, const std::shared_
 	auto menu = CreateMenu();
 	menus[info.id_name] = menu;
 	UINT uFlags = 0;
-	LPCTSTR str = nullptr;
 	std::shared_ptr<Callback> call = callback;
 	UINT_PTR ptr = (UINT_PTR)menu;
 	switch (info.type) {
 	case MenuType::DropDown:
 		uFlags = MF_STRING | MF_POPUP;
-		str = info.display.c_str();
 		break;
 	case MenuType::Click:
 		uFlags = MF_STRING;
-		str = info.display.c_str();
 		menu_callbacks[menu_id] = call;
 		ptr = menu_id;
 		++menu_id;
@@ -181,7 +180,7 @@ void ZLib::WindowConfig::appendMenuItem(const MenuInfo& info, const std::shared_
 	default:
 		break;
 	}
-	AppendMenuW(menus[info.father_name], uFlags, ptr, str);
+	AppendMenu(menus[info.father_name], uFlags, ptr, info.display.c_str());
 	
 }
 
@@ -196,6 +195,31 @@ void ZLib::WindowConfig::setTimerCallback(const std::shared_ptr<Callback>& callb
 void ZLib::WindowConfig::setCallback(const std::shared_ptr<Callback>& callback, UINT message)
 {
 	message_callbacks[message] = callback;
+}
+
+void ZLib::WindowConfig::setCallback(CallbackFunc callback, UINT message)
+{
+	setCallback(std::make_shared<DefaultCallback>(callback), message);
+}
+
+void ZLib::WindowConfig::setDrawCallback(const std::shared_ptr<Callback>& callback)
+{
+	setCallback(callback, WM_PAINT);
+}
+
+void ZLib::WindowConfig::setDrawCallback(CallbackFunc callback)
+{
+	setCallback(callback, WM_PAINT);
+}
+
+void ZLib::WindowConfig::setQuitCallback(const std::shared_ptr<Callback>& callback)
+{
+	setCallback(callback, WM_DESTROY);
+}
+
+void ZLib::WindowConfig::setQuitCallback(CallbackFunc callback)
+{
+	setCallback(callback, WM_DESTROY);
 }
 
 LRESULT ZLib::WindowConfig::executeMenuCallback(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
@@ -238,14 +262,18 @@ LRESULT ZLib::WindowConfig::executeCallback(HWND hwnd, UINT message, WPARAM wpar
 		return_val = executeTimerCallback(hwnd, message, wparam, lparam);
 		break;
 	case WM_DESTROY:
-		PostQuitMessage(0);
 		owner->close();
+		PostQuitMessage(0);
 		break;
 	case WM_COMMAND:
 		// 判断是否是菜单
 		return_val = executeMenuCallback(hwnd, message, wparam, lparam);
 		break;
+	case WM_QUIT:
+		
+		break;
 	}
+
 	if (return_val == USE_DEFAULT_CALLBACK) {
 		auto iter = message_callbacks.find(message);
 		if (iter != message_callbacks.end()) {
@@ -266,7 +294,7 @@ ZLib::WindowConfig::~WindowConfig()
 	
 }
 
-ZLib::WindowConfig::WindowConfig(ZWindow* ptr) :width(CW_USEDEFAULT), height(CW_USEDEFAULT), window_name(TEXT("NewWindow")),menu_id(0),owner(ptr)
+ZLib::WindowConfig::WindowConfig(ZWindow* ptr) :width(CW_USEDEFAULT), height(CW_USEDEFAULT), window_name(Z_STRING("NewWindow")),menu_id(0),owner(ptr)
 {
 	menus[""] = CreateMenu();
 
@@ -276,24 +304,24 @@ ZLib::WindowConfig::WindowConfig(const WindowConfig& config)
 {}
 
 
-ZLib::MenuInfo::MenuInfo(const std::string& id_name_, const std::wstring& display_str_, MenuType type_,const std::string& father_):
+ZLib::MenuInfo::MenuInfo(const std::string& id_name_, const String& display_str_, MenuType type_,const std::string& father_):
 id_name(id_name_),display(display_str_),type(type_),father_name(father_)
 {}
 
-std::vector<std::wstring> ZLib::getFilePath(HWND hwnd, bool is_open,bool is_multi, const std::map<std::wstring, std::vector<std::wstring>>& filters)
+std::vector<ZLib::String> ZLib::getFilePath(HWND hwnd, bool is_open,bool is_multi, const std::map<String, std::vector<String>>& filters)
 {
-	WCHAR str_filename[MAX_PATH];
-	std::wstring filter_str;
+	String_t str_filename[MAX_PATH];
+	String filter_str;
 	OPENFILENAME ofn;
 	ZeroMemory(&ofn, sizeof(OPENFILENAME));
 	ofn.hwndOwner = hwnd;
 	ofn.lStructSize = sizeof(OPENFILENAME);
 	ofn.lpstrFile = str_filename;
-	ofn.lpstrFile[0] = TEXT('\0');
+	ofn.lpstrFile[0] = Z_STRING('\0');
 	ofn.nMaxFile = sizeof(str_filename);
 	ofn.Flags = OFN_PATHMUSTEXIST | OFN_EXPLORER;
 	ofn.hInstance= GetModuleHandle(NULL);
-	ofn.lpstrInitialDir=L".\\";
+	ofn.lpstrInitialDir=Z_STRING(".\\");
 	if (is_open) {
 		ofn.Flags |= OFN_FILEMUSTEXIST;
 	} else {
@@ -308,17 +336,17 @@ std::vector<std::wstring> ZLib::getFilePath(HWND hwnd, bool is_open,bool is_mult
 		ofn.nFilterIndex = 1;
 		for (auto& filter : filters) {
 			filter_str += filter.first;
-			filter_str.push_back(TEXT('\0'));
+			filter_str.push_back(Z_STRING('\0'));
 			bool first = true;
 			for (auto& suffix : filter.second) {
 				if (!first) {
-					filter_str += TEXT(";");
+					filter_str += Z_STRING(";");
 				} else {
 					first = false;
 				}
-				filter_str += TEXT("*.") + suffix;
+				filter_str += Z_STRING("*.") + suffix;
 			}
-			filter_str.push_back(TEXT('\0'));
+			filter_str.push_back(Z_STRING('\0'));
 		}
 		ofn.lpstrFilter = filter_str.c_str();
 		if (!is_open) {
@@ -326,7 +354,7 @@ std::vector<std::wstring> ZLib::getFilePath(HWND hwnd, bool is_open,bool is_mult
 			int c = 1;
 			for (auto& filter : filters) {
 				for (auto& suffix : filter.second) {
-					if (suffix != L"*") {
+					if (suffix != Z_STRING("*")) {
 						ofn.lpstrDefExt = suffix.c_str();
 						flag = false;
 						ofn.nFilterIndex = c;
@@ -348,16 +376,16 @@ std::vector<std::wstring> ZLib::getFilePath(HWND hwnd, bool is_open,bool is_mult
 	} else {
 		GetSaveFileName(&ofn);
 	}
-	std::vector<std::wstring> re;
+	std::vector<String> re;
 	if (!is_multi) {
-		re.push_back(std::wstring(str_filename));
+		re.push_back(String(str_filename));
 	} else {
-		std::wstring dir;
+		String dir;
 		int i;
 		for (i = 0; str_filename[i] != L'\0'; ++i) {
 
 		}
-		dir= std::wstring(str_filename, str_filename + i);
+		dir= String(str_filename, str_filename + i);
 		dir.push_back(L'\\');
 		++i;
 		for (; str_filename[i] != L'\0'; ++i) {
@@ -365,7 +393,7 @@ std::vector<std::wstring> ZLib::getFilePath(HWND hwnd, bool is_open,bool is_mult
 			while (str_filename[i + c] != L'\0') {
 				++c;
 			}
-			re.push_back(dir + std::wstring(str_filename + i, str_filename + i + c));
+			re.push_back(dir + String(str_filename + i, str_filename + i + c));
 			i += c;
 		}
 	}

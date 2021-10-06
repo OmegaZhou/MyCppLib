@@ -8,8 +8,27 @@
 #define DRAW_TIME_ID 1027
 #define FRAME_RATE 30
 #define USE_DEFAULT_CALLBACK 1998
+#define SUCCESS 0
+#ifdef  UNICODE
 namespace ZLib
 {
+	typedef std::wstring String;
+	typedef WCHAR String_t;
+}
+
+#define Z_STRING(x) TEXT(x)
+#else
+namespace ZLib
+{
+	typedef CHAR String_t;
+	typedef std::string String;
+}
+
+#define Z_STRING(x) (x)
+#endif //  UNICODE
+namespace ZLib
+{
+	typedef LRESULT(*CallbackFunc)(HWND, UINT, WPARAM, LPARAM);
 	class ZWindow;
 	enum class MenuType
 	{
@@ -18,31 +37,53 @@ namespace ZLib
 	};
 	struct MenuInfo
 	{
-		MenuInfo(const std::string& id_name,const std::wstring& display_str, MenuType type,const std::string& father = "");
+		MenuInfo(const std::string& id_name,const String& display_str, MenuType type,const std::string& father = "");
 		std::string father_name;
 		std::string id_name;
-		std::wstring display;
+		String display;
 		MenuType type;
 	};
 
 	class Callback
 	{
 	public:
-		virtual int operator()(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
+		virtual LRESULT operator()(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
 		{
 			return 0;
 		};
 	};
-	std::vector<std::wstring> getFilePath(HWND hwnd, bool is_select,bool is_multi=false, const std::map<std::wstring, std::vector<std::wstring>>& filter = {});
+
+	class DefaultCallback:public Callback
+	{
+	public:
+		DefaultCallback(CallbackFunc callback):call(callback)
+		{
+
+		}
+		virtual LRESULT operator()(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
+		{
+			return call(hwnd, message, wparam, lparam);
+		};
+	private:
+		CallbackFunc call;
+	};
+
+	std::vector<String> getFilePath(HWND hwnd, bool is_select,bool is_multi=false, const std::map<String, std::vector<String>>& filter = {});
 
 	struct WindowConfig
 	{
 		friend class ZWindow;
 		int width, height;
-		std::wstring window_name;
+		String window_name;
 		void appendMenuItem(const MenuInfo& info, const std::shared_ptr<Callback>& callback);
+		// Must call this function after calling the start function
 		void setTimerCallback(const std::shared_ptr<Callback>& callback, unsigned int timer_id, unsigned int t = 1000 / FRAME_RATE);
 		void setCallback(const std::shared_ptr<Callback>& callback, UINT message);
+		void setCallback(CallbackFunc callback, UINT message);
+		void setDrawCallback(const std::shared_ptr<Callback>& callback);
+		void setDrawCallback(CallbackFunc callback);
+		void setQuitCallback(const std::shared_ptr<Callback>& callback);
+		void setQuitCallback(CallbackFunc callback);
 		LRESULT executeMenuCallback(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
 		LRESULT executeTimerCallback(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
 		LRESULT executeCallback(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
