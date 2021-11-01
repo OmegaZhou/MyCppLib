@@ -63,7 +63,7 @@ ZLib::ZWindow& ZLib::ZWindow::start()
 
 WPARAM ZLib::ZWindow::loop()
 {
-	while ((!is_closed) && GetMessage(&msg, hwnd, NULL, 0)>0) {
+	while ((!is_closed) && GetMessage(&msg, NULL, NULL, 0)>0) {
 
 		//·­ÒëÏûÏ¢
 		TranslateMessage(&msg);
