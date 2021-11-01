@@ -21,7 +21,7 @@ size_t ZLib::getIndex(size_t x, size_t y, size_t w, size_t h)
 	return w * y + x;
 }
 
-ZLib::ImageBuffer::ImageBuffer(int w, int h):frame_buffer(nullptr)
+ZLib::ImageBuffer::ImageBuffer(int w, int h):frame_buffer(nullptr), width(0), height(0)
 {
 	resize(w, h);
 	clearBuffer();
