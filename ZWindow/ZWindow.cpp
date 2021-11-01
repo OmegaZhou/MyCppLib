@@ -184,12 +184,22 @@ void ZLib::WindowConfig::appendMenuItem(const MenuInfo& info, const std::shared_
 	
 }
 
+void ZLib::WindowConfig::appendMenuItem(const MenuInfo& info, CallbackFunc callback)
+{
+	appendMenuItem(info,std::make_shared<DefaultCallback>(callback));
+}
+
 void ZLib::WindowConfig::setTimerCallback(const std::shared_ptr<Callback>& callback, unsigned int timer_id, unsigned int t)
 {
 	timer_callbacks[timer_id] = callback;
 	auto hwnd = owner->getHWND();
 	SetTimer(hwnd, timer_id, t, NULL);
 
+}
+
+void ZLib::WindowConfig::setTimerCallback(CallbackFunc callback, unsigned int timer_id, unsigned int t)
+{
+	setTimerCallback(std::make_shared<DefaultCallback>(callback), timer_id, t);
 }
 
 void ZLib::WindowConfig::setCallback(const std::shared_ptr<Callback>& callback, UINT message)

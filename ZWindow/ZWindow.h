@@ -76,8 +76,10 @@ namespace ZLib
 		int width, height;
 		String window_name;
 		void appendMenuItem(const MenuInfo& info, const std::shared_ptr<Callback>& callback);
+		void appendMenuItem(const MenuInfo& info, CallbackFunc callback);
 		// Must call this function after calling the start function
 		void setTimerCallback(const std::shared_ptr<Callback>& callback, unsigned int timer_id, unsigned int t = 1000 / FRAME_RATE);
+		void setTimerCallback(CallbackFunc callback, unsigned int timer_id, unsigned int t = 1000 / FRAME_RATE);
 		void setCallback(const std::shared_ptr<Callback>& callback, UINT message);
 		void setCallback(CallbackFunc callback, UINT message);
 		void setDrawCallback(const std::shared_ptr<Callback>& callback);
