@@ -1,7 +1,8 @@
 ﻿#include "CudaBVH.h"
+
 #include "thrust\sort.h"
 #include "thrust\device_vector.h"
-#include "thrust/execution_policy.h"
+#include "tri_contact.cuh"
 #define MAX_BLOCK_SIZE 32
 
 __device__ __host__ static unsigned int expandBits(unsigned int v)
@@ -32,7 +33,34 @@ __device__ __host__ unsigned int ZLib::getMortonCode(double x, double y, double 
     return xx * 4 + yy * 2 + zz;
 }
 
+__device__ __host__ bool ZLib::checkIntersection(int a, int b, const ZLib::PointsSet& points, const ZLib::TrianglesSet& triangles)
+{
+    vec3f m[3];
+    vec3f n[3];
+    int v0[3];
+    int v1[3];
+    for (int i = 0; i < 3; ++i) {
+        int i1 = triangles.v[i][a];
+        v0[i] = i1;
+        m[i].x = points.x[i1];
+        m[i].y = points.y[i1];
+        m[i].z = points.z[i1];
 
+        int i2 = triangles.v[i][b];
+        v1[i] = i2;
+        n[i].x = points.x[i2];
+        n[i].y = points.y[i2];
+        n[i].z = points.z[i2];
+    }
+    for (int i = 0; i < 3; ++i) {
+        for (int j = 0; j < 3; ++j) {
+            if (v0[i] == v1[j]) {
+                return false;
+            }
+        }
+    }
+    return tri_contact(m[0], m[1], m[2], n[0], n[1], n[2]);
+}
 __global__ void ZLib::findIntersections(CudaBVH bvh)
 {
     int offset = blockIdx.x * blockDim.x + threadIdx.x;
@@ -185,12 +213,26 @@ __global__ static void buildTree(ZLib::BVHNodes internal_nodes, ZLib::LeafNodes 
 
 __device__ static void mergeAABB(int result, int a, int b,const ZLib::AABBs& aabbs)
 {
-    aabbs.x0[result] = my_min(aabbs.x0[a], aabbs.x0[b]);
-    aabbs.x1[result] = my_max(aabbs.x1[a], aabbs.x1[b]);
-    aabbs.y0[result] = my_min(aabbs.y0[a], aabbs.y0[b]);
-    aabbs.y1[result] = my_max(aabbs.y1[a], aabbs.y1[b]);
-    aabbs.z0[result] = my_min(aabbs.z0[a], aabbs.z0[b]);
-    aabbs.z1[result] = my_max(aabbs.z1[a], aabbs.z1[b]);
+    double x0 = my_min(aabbs.x0[a], aabbs.x0[b]);
+    double x1 = my_max(aabbs.x1[a], aabbs.x1[b]);
+    atomicExch((unsigned int*)(aabbs.x0 + result), *((unsigned int*)(&x0)));
+    atomicExch((unsigned int*)(aabbs.x0 + result) + 1, *((unsigned int*)(&x0) + 1));
+    atomicExch((unsigned int*)(aabbs.x1 + result), *((unsigned int*)(&x1)));
+    atomicExch((unsigned int*)(aabbs.x1 + result) + 1, *((unsigned int*)(&x1) + 1));
+
+    double y0 = my_min(aabbs.y0[a], aabbs.y0[b]);
+    double y1 = my_max(aabbs.y1[a], aabbs.y1[b]);
+    atomicExch((unsigned int*)(aabbs.y0 + result), *((unsigned int*)(&y0)));
+    atomicExch((unsigned int*)(aabbs.y0 + result) + 1, *((unsigned int*)(&y0) + 1));
+    atomicExch((unsigned int*)(aabbs.y1 + result), *((unsigned int*)(&y1)));
+    atomicExch((unsigned int*)(aabbs.y1 + result) + 1, *((unsigned int*)(&y1) + 1));
+
+    double z0 = my_min(aabbs.z0[a], aabbs.z0[b]);
+    double z1 = my_max(aabbs.z1[a], aabbs.z1[b]);
+    atomicExch((unsigned int*)(aabbs.z0 + result), *((unsigned int*)(&z0)));
+    atomicExch((unsigned int*)(aabbs.z0 + result) + 1, *((unsigned int*)(&z0) + 1));
+    atomicExch((unsigned int*)(aabbs.z1 + result), *((unsigned int*)(&z1)));
+    atomicExch((unsigned int*)(aabbs.z1 + result) + 1, *((unsigned int*)(&z1) + 1));
 }
 
 __device__ void printfAABB(ZLib::AABBs aabbs, int a)
@@ -344,35 +386,73 @@ __device__ void my_swap(int& a, int& b)
 
 __device__ void ZLib::CudaBVH::find(int root, int triangle_id, int offset)
 {
+    extern __shared__ int s_stack[];
     int n = triangle_num - 1;
-    if (internal_nodes.l_types[root] == 0) {
-        int id1 = internal_nodes.lefts[root];
-        int id2 = leaf_nodes.data_ids[id1];
-        if (offset < id1 && checkIntersection(triangle_id, id2, points, triangles)) {
-            int l = triangle_id < id2 ? triangle_id : id2;
-            int r = triangle_id < id2 ? id2 : triangle_id;
-            printf("contact found at (%d, %d)\n", l, r);
+    int top = -1;
+    int max_l = STACK_SIZE;
+    int* stack1 = s_stack + threadIdx.x * STACK_SIZE * 2;
+    int* stack2 = s_stack + threadIdx.x * STACK_SIZE * 2 + STACK_SIZE;
+    ++top;
+    stack1[top] = root;
+    stack2[top] = 0;
+    bool first = true;
+    while (top >= 0) {
+        int node = stack1[top];
+        int visit_type = stack2[top];
+        bool node_type;
+        int child;
+        bool flag = true;
+        if (visit_type == 0) {
+            node_type = internal_nodes.l_types[node];
+            child = internal_nodes.lefts[node];
+            stack2[top] = 1;
+            flag = (offset < child);
+        } else if (visit_type == 1) {
+            node_type = internal_nodes.r_types[node];
+            child = internal_nodes.rights[node];
+            stack2[top] = 2;
+        } else {
+            --top;
+            continue;
         }
-    } else {
-        int id2 = internal_nodes.lefts[root];
-        if (offset < id2 && checkInBox(triangle_id + n, id2, aabbs)) {
-            find(id2, triangle_id, offset);
+        if (node_type == 0) {
+            int id2 = leaf_nodes.data_ids[child];
+            if (offset < child && checkIntersection(triangle_id, id2, points, triangles)) {
+                int l = triangle_id < id2 ? triangle_id : id2;
+                int r = triangle_id < id2 ? id2 : triangle_id;
+                printf("contact found at (%d, %d)\n", l, r);
+
+            }
+        } else {
+
+            if (flag && checkInBox(triangle_id + n, child, aabbs)) {
+                ++top;
+                if (top == max_l) {
+                    int* tmp = (int*)malloc(max_l * 2 * sizeof(int));
+                    int* tmp2 = (int*)malloc(max_l * 2 * sizeof(int));
+                    for (int i = 0; i < top; ++i) {
+                        tmp[i] = stack1[i];
+                    }
+                    for (int i = 0; i < top; ++i) {
+                        tmp2[i] = stack2[i];
+                    }
+                    if (!first) {
+                        ::free(stack1);
+                        ::free(stack2);
+                    }
+                    first = false;
+                    stack1 = tmp;
+                    stack2 = tmp2;
+                    max_l *= 2;
+                }
+                stack1[top] = child;
+                stack2[top] = 0;
+            }
         }
     }
-
-    if (internal_nodes.r_types[root] == 0) {
-        int id1 = internal_nodes.rights[root];
-        int id2 = leaf_nodes.data_ids[id1];
-        if (offset < id1 && checkIntersection(triangle_id, id2, points, triangles)) {
-            int l = triangle_id < id2 ? triangle_id : id2;
-            int r = triangle_id < id2 ? id2 : triangle_id;
-            printf("contact found at (%d, %d)\n", l, r);
-        }
-    } else {
-        int id2 = internal_nodes.rights[root];
-        if (checkInBox(triangle_id + n, id2, aabbs)) {
-            find(id2, triangle_id, offset);
-        }
+    if (!first) {
+        ::free(stack1);
+        ::free(stack2);
     }
 }
 
@@ -403,10 +483,12 @@ void ZLib::CudaBVH::free()
     HANDLE_ERROR(cudaFree(aabbs.z0));
     HANDLE_ERROR(cudaFree(aabbs.z1));
 
+
 }
 
 void ZLib::CudaBVH::allocDeviceMemory(const PointsSet& _points, const TrianglesSet& _triangles)
 {
+
     // 分配points内存，并复制内存
     HANDLE_ERROR(cudaMalloc(&points.x, point_num * sizeof(*(points.x))));
     HANDLE_ERROR(cudaMalloc(&points.y, point_num * sizeof(*(points.y))));

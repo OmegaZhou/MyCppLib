@@ -2,6 +2,7 @@
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 #include "Utils.cuh"
+#define STACK_SIZE 32
 namespace ZLib
 {
 	// µã¼¯
