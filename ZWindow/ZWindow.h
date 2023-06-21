@@ -15,7 +15,7 @@ namespace ZLib
 	typedef std::wstring String;
 	typedef WCHAR String_t;
 }
-
+#define Z_CHAR(x) TEXT(x)
 #define Z_STRING(x) TEXT(x)
 #else
 namespace ZLib
@@ -25,6 +25,7 @@ namespace ZLib
 }
 
 #define Z_STRING(x) (x)
+#define Z_CHAR(x) (x)
 #endif //  UNICODE
 namespace ZLib
 {

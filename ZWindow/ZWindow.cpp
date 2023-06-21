@@ -387,20 +387,20 @@ std::vector<ZLib::String> ZLib::getFilePath(HWND hwnd, bool is_open,bool is_mult
 		GetSaveFileName(&ofn);
 	}
 	std::vector<String> re;
-	if (!is_multi) {
+	if (str_filename[ofn.nFileOffset-1]!= Z_STRING('\0')) {
 		re.push_back(String(str_filename));
 	} else {
 		String dir;
 		int i;
-		for (i = 0; str_filename[i] != L'\0'; ++i) {
+		for (i = 0; str_filename[i] != Z_STRING('\0'); ++i) {
 
 		}
 		dir= String(str_filename, str_filename + i);
-		dir.push_back(L'\\');
+		dir.push_back(Z_STRING('\\'));
 		++i;
-		for (; str_filename[i] != L'\0'; ++i) {
+		for (; str_filename[i] != Z_STRING('\0'); ++i) {
 			int c = 0;
-			while (str_filename[i + c] != L'\0') {
+			while (str_filename[i + c] != Z_STRING('\0')) {
 				++c;
 			}
 			re.push_back(dir + String(str_filename + i, str_filename + i + c));
