@@ -378,15 +378,18 @@ std::vector<ZLib::String> ZLib::getFilePath(HWND hwnd, bool is_open,bool is_mult
 			}
 		}
 	}
-
+	int has_file = false;
 	if (is_open) {
 		//ShowWindow(hwnd, SW_HIDE);
-		GetOpenFileName(&ofn);
+		has_file = GetOpenFileName(&ofn);
 		//ShowWindow(hwnd, SW_SHOW);
 	} else {
-		GetSaveFileName(&ofn);
+		has_file = GetSaveFileName(&ofn);
 	}
 	std::vector<String> re;
+	if (!has_file) {
+		return re;
+	}
 	if (str_filename[ofn.nFileOffset-1]!= Z_STRING('\0')) {
 		re.push_back(String(str_filename));
 	} else {
